@@ -747,7 +747,31 @@ function migrarBuckets(){
     if(!t.labels)t.labels=[];
     // Garantir que o bucket referenciado existe; senão joga no primeiro
     if(!S.buckets.find(b=>b.id===t.bucketId))t.bucketId=S.buckets[0]?.id||'b_afazer';
+    // Para recorrentes: garantir que exista uma coluna "de origem" (home)
+    if(t.recorrencia&&!t.bucketHome){
+      const bAtual=S.buckets.find(b=>b.id===t.bucketId);
+      const ehConcluido=bAtual&&/conclu/i.test(bAtual.nome);
+      t.bucketHome=ehConcluido?(S.buckets.find(b=>!/conclu/i.test(b.nome))?.id||S.buckets[0]?.id):t.bucketId;
+    }
   });
+  resetRecorrentesDiarias();
+}
+
+// Toda tarefa recorrente que estiver numa coluna "Concluído" mas não foi
+// concluída HOJE volta automaticamente para sua coluna de origem.
+function resetRecorrentesDiarias(){
+  const hj=hoje();
+  let mudou=false;
+  (S.tasks||[]).forEach(t=>{
+    if(!t.recorrencia)return;
+    const b=S.buckets.find(x=>x.id===t.bucketId);
+    const estaConcluida=b&&/conclu/i.test(b.nome);
+    if(estaConcluida&&t.doneDate!==hj){
+      t.bucketId=t.bucketHome||S.buckets.find(x=>!/conclu/i.test(x.nome))?.id||S.buckets[0]?.id;
+      mudou=true;
+    }
+  });
+  if(mudou)setTimeout(()=>save(),300);
 }
 async function save(){
   setSS('loading','salvando...');localStorage.setItem('painel-v4',JSON.stringify(S));await wFb();
@@ -866,10 +890,10 @@ function checklistProg(t){const cl=t.checklist||[];if(!cl.length)return null;con
 function cardHTML(t){
   const prog=checklistProg(t);
   const labels=(t.labels||[]).map(l=>`<span style="font-size:.55rem;padding:1px 6px;border-radius:8px;background:${LABEL_C[l]||'var(--border2)'}22;color:${LABEL_C[l]||'var(--text-muted)'};font-weight:600">${l}</span>`).join('');
-  const done=prog&&prog.pct===100;
-  return `<div class="pcard" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 11px;cursor:grab;border-left:3px solid ${PRIO_C[t.prioridade]||'var(--border2)'};user-select:none;${done?'opacity:.55;':''}" draggable="true" id="kbcard-${t.id}" ondragstart="kbStart(event,'${t.id}')" ondragend="kbEnd(event)" onclick="if(event.target.tagName!=='BUTTON')editTask('${t.id}')">
+  const done=tarefaConcluida(t);
+  return `<div class="pcard" style="background:${done?'var(--bg)':'var(--surface2)'};border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 11px;cursor:grab;border-left:3px solid ${done?'var(--text-dim)':(PRIO_C[t.prioridade]||'var(--border2)')};user-select:none;${done?'opacity:.6;':''}" draggable="true" id="kbcard-${t.id}" ondragstart="kbStart(event,'${t.id}')" ondragend="kbEnd(event)" onclick="if(event.target.tagName!=='BUTTON')editTask('${t.id}')">
     ${labels?`<div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:6px;">${labels}</div>`:''}
-    <div style="display:flex;align-items:flex-start;gap:5px;margin-bottom:5px;"><div style="font-size:.79rem;font-weight:500;line-height:1.3;flex:1;${done?'text-decoration:line-through;color:var(--text-muted);':''}">${t.titulo}</div><div style="display:flex;gap:2px;flex-shrink:0;"><button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:.67rem;padding:1px 3px;" onclick="event.stopPropagation();editTask('${t.id}')">✏</button><button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:.67rem;padding:1px 3px;" onclick="event.stopPropagation();delItem('tasks','${t.id}')">✕</button></div></div>
+    <div style="display:flex;align-items:flex-start;gap:5px;margin-bottom:5px;"><div style="font-size:.79rem;font-weight:500;line-height:1.3;flex:1;${done?'text-decoration:line-through;color:var(--text-muted);':''}">${done?'✓ ':''}${t.titulo}</div><div style="display:flex;gap:2px;flex-shrink:0;"><button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:.67rem;padding:1px 3px;" onclick="event.stopPropagation();editTask('${t.id}')">✏</button><button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:.67rem;padding:1px 3px;" onclick="event.stopPropagation();delItem('tasks','${t.id}')">✕</button></div></div>
     ${t.desc?`<div style="font-size:.69rem;color:var(--text-muted);margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${t.desc}</div>`:''}
     ${prog?`<div style="margin-bottom:6px;"><div style="display:flex;justify-content:space-between;font-size:.58rem;color:var(--text-muted);margin-bottom:2px;font-family:'JetBrains Mono',monospace"><span>☑ ${prog.done}/${prog.total}</span><span>${prog.pct}%</span></div><div style="height:4px;background:var(--surface3);border-radius:2px;overflow:hidden"><div style="height:100%;background:${prog.pct===100?'var(--green)':'var(--accent)'};width:${prog.pct}%"></div></div></div>`:''}
     <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">${t.categoria?`<span class="badge b-accent" style="font-size:.55rem;padding:1px 5px">${t.categoria}</span>`:''}<span class="badge" style="font-size:.55rem;padding:1px 5px;background:${(PRIO_C[t.prioridade]||'var(--border2)')}20;color:${PRIO_C[t.prioridade]||'var(--text-muted)'}">${t.prioridade||''}</span>${t.recorrencia?`<span class="badge b-teal" style="font-size:.55rem;padding:1px 5px">${recLabel(t)}</span>`:''}${t.data&&!t.recorrencia?`<span style="font-family:'JetBrains Mono',monospace;font-size:.58rem;color:var(--text-muted);margin-left:auto">${fmt(t.data)}</span>`:''}</div>
@@ -877,6 +901,7 @@ function cardHTML(t){
 }
 
 function renderBoard(){
+  resetRecorrentesDiarias();
   const busca=(document.getElementById('tk-search')?.value||'').toLowerCase();
   const fprio=document.getElementById('tk-prio')?.value||'';
   const fdata=document.getElementById('tk-data')?.value||'';
@@ -932,7 +957,30 @@ function renderBoard(){
 function kbStart(e,id){dragKB=id;dragBucket=null;e.stopPropagation();setTimeout(()=>{const el=document.getElementById('kbcard-'+id);if(el)el.style.opacity='.35';},0);e.dataTransfer.effectAllowed='move';}
 function kbEnd(e){document.querySelectorAll('[id^=kbcard-]').forEach(c=>c.style.opacity='');document.querySelectorAll('.board-col').forEach(c=>c.classList.remove('drop-target'));}
 function bucketColOver(e,bid){if(dragKB){e.preventDefault();const c=document.getElementById('kbc-'+bid);if(c&&c.parentElement)c.parentElement.classList.add('drop-target');}}
-function bucketColDrop(e,bid){e.preventDefault();document.querySelectorAll('.board-col').forEach(c=>c.classList.remove('drop-target'));if(!dragKB)return;const idx=S.tasks.findIndex(t=>t.id===dragKB);if(idx>=0&&S.tasks[idx].bucketId!==bid){S.tasks[idx].bucketId=bid;save();renderBoard();updateBadges();}dragKB=null;}
+function bucketColDrop(e,bid){
+  e.preventDefault();
+  document.querySelectorAll('.board-col').forEach(c=>c.classList.remove('drop-target'));
+  if(!dragKB)return;
+  const idx=S.tasks.findIndex(t=>t.id===dragKB);
+  if(idx>=0&&S.tasks[idx].bucketId!==bid){
+    const t=S.tasks[idx];
+    const destBucket=S.buckets.find(b=>b.id===bid);
+    const indoConcluido=destBucket&&/conclu/i.test(destBucket.nome);
+    if(t.recorrencia){
+      if(indoConcluido){
+        t.doneDate=hoje();
+        // bucketHome já deve existir (setado na migração); se não, usa o bucket atual antes de mover
+        if(!t.bucketHome)t.bucketHome=t.bucketId;
+      }else{
+        t.doneDate=null;
+        t.bucketHome=bid; // nova coluna de origem
+      }
+    }
+    t.bucketId=bid;
+    save();renderBoard();updateBadges();
+  }
+  dragKB=null;
+}
 
 // ── DRAG PARA REORDENAR BUCKETS ──
 function bucketDragStart(e,bid){dragBucket=bid;dragKB=null;e.dataTransfer.effectAllowed='move';}
@@ -943,7 +991,10 @@ function bucketReorderDrop(e,bid){e.preventDefault();if(!dragBucket||dragBucket=
 // ── GESTÃO DE BUCKETS ──
 function novaBucket(){const nome=prompt('Nome da nova coluna:');if(!nome||!nome.trim())return;const cores=['var(--accent)','var(--amber)','var(--green)','var(--teal)','var(--purple)','var(--red)','var(--text-muted)'];const cor=cores[S.buckets.length%cores.length];S.buckets.push({id:'b_'+uid(),nome:nome.trim(),cor});save();renderBoard();}
 function renomearBucket(bid){const b=S.buckets.find(x=>x.id===bid);if(!b)return;const nome=prompt('Renomear coluna:',b.nome);if(!nome||!nome.trim())return;b.nome=nome.trim();save();renderBoard();}
-function excluirBucket(bid){const b=S.buckets.find(x=>x.id===bid);if(!b)return;const qtd=S.tasks.filter(t=>t.bucketId===bid).length;if(S.buckets.length<=1){alert('Você precisa ter ao menos uma coluna.');return;}if(qtd>0){if(!confirm(`A coluna "${b.nome}" tem ${qtd} tarefa(s). Elas serão movidas para a primeira coluna. Continuar?`))return;const destino=S.buckets.find(x=>x.id!==bid).id;S.tasks.forEach(t=>{if(t.bucketId===bid)t.bucketId=destino;});}else{if(!confirm(`Excluir a coluna "${b.nome}"?`))return;}S.buckets=S.buckets.filter(x=>x.id!==bid);save();renderBoard();updateBadges();}
+function excluirBucket(bid){const b=S.buckets.find(x=>x.id===bid);if(!b)return;const qtd=S.tasks.filter(t=>t.bucketId===bid).length;if(S.buckets.length<=1){alert('Você precisa ter ao menos uma coluna.');return;}if(qtd>0){if(!confirm(`A coluna "${b.nome}" tem ${qtd} tarefa(s). Elas serão movidas para a primeira coluna. Continuar?`))return;const destino=S.buckets.find(x=>x.id!==bid).id;S.tasks.forEach(t=>{if(t.bucketId===bid)t.bucketId=destino;});}else{if(!confirm(`Excluir a coluna "${b.nome}"?`))return;}
+  const destinoFallback=S.buckets.find(x=>x.id!==bid).id;
+  S.tasks.forEach(t=>{if(t.bucketHome===bid)t.bucketHome=destinoFallback;});
+  S.buckets=S.buckets.filter(x=>x.id!==bid);save();renderBoard();updateBadges();}
 
 // ── VISÃO LISTA (agrupada por bucket) ──
 function renderTaskListaView(){
@@ -964,9 +1015,10 @@ function renderTaskListaView(){
 }
 function taskRowP(t){
   const prog=checklistProg(t);
+  const done=tarefaConcluida(t);
   const labels=(t.labels||[]).map(l=>`<span style="font-size:.55rem;padding:1px 6px;border-radius:8px;background:${LABEL_C[l]||'var(--border2)'}22;color:${LABEL_C[l]||'var(--text-muted)'};font-weight:600">${l}</span>`).join(' ');
-  return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:9px 13px;display:flex;align-items:center;gap:10px;margin-bottom:5px;border-left:3px solid ${PRIO_C[t.prioridade]||'var(--border2)'};cursor:pointer;" onclick="editTask('${t.id}')">
-    <div style="flex:1;min-width:0;"><div style="font-size:.82rem;font-weight:500;">${t.titulo}</div>${t.desc?`<div style="font-size:.71rem;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${t.desc}</div>`:''}</div>
+  return `<div style="background:${done?'var(--bg)':'var(--surface)'};border:1px solid var(--border);border-radius:var(--radius-sm);padding:9px 13px;display:flex;align-items:center;gap:10px;margin-bottom:5px;border-left:3px solid ${done?'var(--text-dim)':(PRIO_C[t.prioridade]||'var(--border2)')};cursor:pointer;${done?'opacity:.6;':''}" onclick="editTask('${t.id}')">
+    <div style="flex:1;min-width:0;"><div style="font-size:.82rem;font-weight:500;${done?'text-decoration:line-through;color:var(--text-muted);':''}">${done?'✓ ':''}${t.titulo}</div>${t.desc?`<div style="font-size:.71rem;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${t.desc}</div>`:''}</div>
     ${labels?`<div style="display:flex;gap:3px;flex-shrink:0;">${labels}</div>`:''}
     ${prog?`<span style="font-family:'JetBrains Mono',monospace;font-size:.62rem;color:${prog.pct===100?'var(--green)':'var(--text-muted)'};flex-shrink:0;">☑ ${prog.done}/${prog.total}</span>`:''}
     <span class="badge" style="font-size:.6rem;flex-shrink:0;background:${(PRIO_C[t.prioridade]||'var(--border2)')}20;color:${PRIO_C[t.prioridade]||'var(--text-muted)'}">${t.prioridade}</span>
